@@ -37,17 +37,26 @@ connectCloudinary()
 app.use(helmet())
 
 // --- CORS: allow frontend and admin panel ---
-const allowedOrigins = [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    process.env.ADMIN_URL    || 'http://localhost:5174',
-]
+// The deployed origins are also listed directly: a FRONTEND_URL/ADMIN_URL that is
+// missing, unset on Production, or carries a trailing slash silently 500s every
+// browser request, which reads as a broken store rather than a config typo.
+const normalizeOrigin = (value) => String(value || '').trim().replace(/\/+$/, '')
+const allowedOrigins = [...new Set([
+    process.env.FRONTEND_URL,
+    process.env.ADMIN_URL,
+    'https://dermyx-frontend.vercel.app',
+    'https://dermyx-admin.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:5174',
+].map(normalizeOrigin).filter(Boolean))]
+
 app.use(cors({
     origin: (origin, callback) => {
         // allow requests with no origin (e.g. curl, Postman) or matching origins
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (!origin || allowedOrigins.includes(normalizeOrigin(origin))) {
             callback(null, true)
         } else {
-            callback(new Error('Not allowed by CORS'))
+            callback(new Error('Not allowed by CORS: ' + origin))
         }
     },
     credentials: true,
