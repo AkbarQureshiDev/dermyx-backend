@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Secrets - never commit
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local upload/temp files
+uploads/
+tmp/
+
+# Vercel
+.vercel/
