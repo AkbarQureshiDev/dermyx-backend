@@ -143,4 +143,8 @@ app.use((err, req, res, next) => {
     })
 })
 
+// Vercel's Node builder uses this export as the request handler; the listen call
+// below is what `npm run server` binds to locally.
+export default app
+
 app.listen(port, () => console.log('Server started on PORT : ' + port))
