@@ -9,12 +9,7 @@ const addProduct = async (req, res) => {
 
         const { name, description, price, category, subCategory, sizes, bestseller, tags, rating, reviewCount, originalPrice, badge, features } = req.body
 
-        const image1 = req.files.image1 && req.files.image1[0]
-        const image2 = req.files.image2 && req.files.image2[0]
-        const image3 = req.files.image3 && req.files.image3[0]
-        const image4 = req.files.image4 && req.files.image4[0]
-
-        const images = [image1, image2, image3, image4].filter((item) => item !== undefined)
+        const images = Array.from({ length: 8 }, (_, i) => req.files?.[`image${i + 1}`]?.[0]).filter(Boolean)
 
         let imagesUrl = await Promise.all(
             images.map(async (item) => {
@@ -132,14 +127,41 @@ const singleProduct = async (req, res) => {
 // function for updating product
 const updateProduct = async (req, res) => {
     try {
-        const { id, price, originalPrice, inStock, features } = req.body
+        const { id, price, originalPrice, inStock, features, category, existingImages } = req.body
         const updateData = {}
         if (price !== undefined) updateData.price = Number(price)
         if (originalPrice !== undefined) updateData.originalPrice = Number(originalPrice)
         if (inStock !== undefined) updateData.inStock = inStock === 'true' || inStock === true
+        if (category !== undefined && category !== '') {
+            updateData.category = category
+            updateData.subCategory = category
+        }
         if (features !== undefined) updateData.features = Array.isArray(features)
             ? features
             : features.split(',').map(f => f.trim()).filter(Boolean)
+
+        if (req.files && Object.keys(req.files).length > 0) {
+            let keptImages = []
+            try {
+                keptImages = existingImages ? JSON.parse(existingImages) : []
+            } catch (parseError) {
+                keptImages = []
+            }
+
+            const images = await Promise.all(
+                Array.from({ length: 8 }, async (_, i) => {
+                    const file = req.files[`image${i + 1}`] && req.files[`image${i + 1}`][0]
+                    if (file) {
+                        const result = await cloudinary.uploader.upload(file.path, { resource_type: 'image' })
+                        return result.secure_url
+                    }
+                    return keptImages[i] || null
+                })
+            )
+
+            const finalImages = images.filter(Boolean)
+            if (finalImages.length > 0) updateData.image = finalImages
+        }
 
         await productModel.findByIdAndUpdate(id, updateData)
         res.json({ success: true, message: 'Product Updated' })

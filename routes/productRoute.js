@@ -5,9 +5,11 @@ import adminAuth from '../middleware/adminAuth.js';
 
 const productRouter = express.Router();
 
-productRouter.post('/add',adminAuth,upload.fields([{name:'image1',maxCount:1},{name:'image2',maxCount:1},{name:'image3',maxCount:1},{name:'image4',maxCount:1}]),addProduct);
+const imageFields = Array.from({ length: 8 }, (_, i) => ({ name: `image${i + 1}`, maxCount: 1 }));
+
+productRouter.post('/add',adminAuth,upload.fields(imageFields),addProduct);
 productRouter.post('/remove',adminAuth,removeProduct);
-productRouter.post('/update',adminAuth,updateProduct);
+productRouter.post('/update',adminAuth,upload.fields(imageFields),updateProduct);
 productRouter.post('/single',singleProduct);
 productRouter.get('/list',listProducts)
 
