@@ -46,7 +46,7 @@ const sendOwnerOrderNotification = async (address, items, amount) => {
 };
 
 // Customer-facing thank-you confirmation for the order they just placed
-const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, orderId) => {
+const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, orderId, showTracking = true) => {
     try {
         const itemRows = (items || []).map(i => `
             <tr>
@@ -89,7 +89,7 @@ const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, or
                     ${address?.phone || ''}
                 </p>
                 <p style="color:#6b7280;font-size:13px;margin-top:20px;">
-                    You can track this order any time from <a href="${process.env.FRONTEND_URL || ''}/orders">My Orders</a>.
+                    ${showTracking ? `You can track this order any time from <a href="${process.env.FRONTEND_URL || ''}/orders">My Orders</a>.` : ''}
                     Questions? Reply to this email or WhatsApp us on 0307-5111131.
                 </p>`)
         })
@@ -161,17 +161,18 @@ const placeOrder = async (req,res) => {
         const newOrder = new orderModel(orderData)
         await newOrder.save()
 
-        const savedOrder = await userModel.findByIdAndUpdate(userId,{cartData:{}})
+        // Guests have no account cart to clear.
+        const savedUser = userId ? await userModel.findByIdAndUpdate(userId,{cartData:{}}) : null
 
         // Notify owner
         await sendOwnerOrderNotification(address, items, amount)
 
         // Thank-you confirmation to the buyer (the delivery form email wins,
         // the account email is the fallback)
-        const buyerEmail = address?.email || savedOrder?.email
-        await sendOrderConfirmationEmail(buyerEmail, items, amount, address, newOrder._id)
+        const buyerEmail = address?.email || savedUser?.email
+        await sendOrderConfirmationEmail(buyerEmail, items, amount, address, newOrder._id, Boolean(userId))
 
-        res.json({success:true,message:"Order Placed"})
+        res.json({success:true,message:"Order Placed",orderId:newOrder._id})
 
 
     } catch (error) {

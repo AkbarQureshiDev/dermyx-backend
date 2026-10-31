@@ -43,4 +43,27 @@ const authUser = async (req, res, next) => {
 
 }
 
+// Guest checkout: a signed-in shopper still gets their order linked to the
+// account, but nothing about the request is required to place a COD order.
+const authOptional = (req, res, next) => {
+
+    const { token } = req.headers;
+
+    // Never trust a client-supplied userId: only a verified token may link an
+    // order to an account, otherwise a guest could target someone else's cart.
+    if (req.body) delete req.body.userId
+
+    if (!token) return next()
+
+    try {
+        const token_decode = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] })
+        if (token_decode.id) req.body.userId = token_decode.id
+    } catch {
+        // A stale token must not block a guest from checking out.
+    }
+
+    next()
+}
+
+export { authOptional }
 export default authUser

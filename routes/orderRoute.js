@@ -1,7 +1,7 @@
 import express from 'express'
 import {placeOrder, placeOrderStripe, placeOrderRazorpay, allOrders, userOrders, updateStatus, deleteOrder, deliveredOrders, verifyStripe, verifyRazorpay} from '../controllers/orderController.js'
 import adminAuth  from '../middleware/adminAuth.js'
-import authUser from '../middleware/auth.js'
+import authUser, { authOptional } from '../middleware/auth.js'
 
 const orderRouter = express.Router()
 
@@ -12,7 +12,7 @@ orderRouter.post('/delete',adminAuth,deleteOrder)
 orderRouter.post('/delivered-orders',adminAuth,deliveredOrders)
 
 // Payment Features
-orderRouter.post('/place',authUser,placeOrder)
+orderRouter.post('/place',authOptional,placeOrder)
 orderRouter.post('/stripe',authUser,placeOrderStripe)
 orderRouter.post('/razorpay',authUser,placeOrderRazorpay)
 
