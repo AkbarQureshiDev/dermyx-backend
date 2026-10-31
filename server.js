@@ -46,6 +46,8 @@ const allowedOrigins = [...new Set([
     process.env.ADMIN_URL,
     'https://dermyx-frontend.vercel.app',
     'https://dermyx-admin.vercel.app',
+    'https://dermyxskincare.com',
+    'https://www.dermyxskincare.com',
     'http://localhost:5173',
     'http://localhost:5174',
 ].map(normalizeOrigin).filter(Boolean))]
