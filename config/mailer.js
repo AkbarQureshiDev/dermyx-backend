@@ -38,6 +38,7 @@ export const sendMail = async ({ to, subject, html }) => {
         subject,
         html
     })
+    console.log(`Email sent: ${subject}`)
     return true
 }
 

@@ -48,12 +48,20 @@ const addReview = async (req, res) => {
             return res.json({ success: false, message: "Review is too long (1000 characters max)" })
         }
 
+        const displayName = String(req.body.name || "").trim().slice(0, 60)
+        // Guests have no account name to fall back on, so they must give one.
+        if (!userId && !displayName) {
+            return res.json({ success: false, message: "Please add the name to show on your review" })
+        }
+
         const product = await productModel.findById(productId)
         if (!product) {
             return res.json({ success: false, message: "Product not found" })
         }
 
-        const existing = await reviewModel.findOne({ product: productId, user: userId })
+        // Only a signed-in reviewer owns a previous review. A guest has no id,
+        // and an undefined filter would match (and overwrite) someone else's.
+        const existing = userId ? await reviewModel.findOne({ product: productId, user: userId }) : null
         const verified = await hasPurchased(userId, productId)
 
         let saved
@@ -67,7 +75,7 @@ const addReview = async (req, res) => {
             saved = await reviewModel.create({
                 product: productId,
                 user: userId,
-                name: String(req.body.name || "").trim().slice(0, 60) || "Customer",
+                name: displayName || "Customer",
                 rating: score,
                 comment: text,
                 verified

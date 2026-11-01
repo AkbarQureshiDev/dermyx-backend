@@ -7,7 +7,7 @@ import nodemailer from "nodemailer"
 const addProduct = async (req, res) => {
     try {
 
-        const { name, description, price, category, subCategory, sizes, bestseller, tags, rating, reviewCount, originalPrice, badge, features } = req.body
+        const { name, description, price, category, subCategory, sizes, bestseller, tags, rating, reviewCount, originalPrice, badge, features, ingredients } = req.body
 
         const images = Array.from({ length: 8 }, (_, i) => req.files?.[`image${i + 1}`]?.[0]).filter(Boolean)
 
@@ -34,6 +34,7 @@ const addProduct = async (req, res) => {
             originalPrice: originalPrice ? Number(originalPrice) : 0,
             badge: badge || '',
             features: features ? features.split(',').map(f => f.trim()).filter(Boolean) : [],
+            ingredients: typeof ingredients === 'string' ? ingredients.trim().slice(0, 2000) : '',
             inStock: true
         }
 
@@ -125,7 +126,7 @@ const singleProduct = async (req, res) => {
 // function for updating product
 const updateProduct = async (req, res) => {
     try {
-        const { id, price, originalPrice, inStock, features, category, existingImages } = req.body
+        const { id, price, originalPrice, inStock, features, ingredients, category, existingImages } = req.body
         const updateData = {}
         if (price !== undefined) updateData.price = Number(price)
         if (originalPrice !== undefined) updateData.originalPrice = Number(originalPrice)
@@ -137,6 +138,7 @@ const updateProduct = async (req, res) => {
         if (features !== undefined) updateData.features = Array.isArray(features)
             ? features
             : features.split(',').map(f => f.trim()).filter(Boolean)
+        if (ingredients !== undefined) updateData.ingredients = String(ingredients).trim().slice(0, 2000)
 
         if (req.files && Object.keys(req.files).length > 0) {
             let keptImages = []

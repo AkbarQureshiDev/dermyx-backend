@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import orderModel from "../models/orderModel.js";
 import userModel from "../models/userModel.js";
 import productModel from "../models/productModel.js";
-import nodemailer from "nodemailer";
 import { sendMail, emailShell, escapeHtml, safeSubject } from "../config/mailer.js";
 import { findCoupon } from "./couponController.js";
 
@@ -41,90 +40,244 @@ const cleanAddress = (address) => {
     return clean
 }
 
-const sendOwnerOrderNotification = async (address, items, amount) => {
+const shortOrderId = (id) => String(id).slice(-6).toUpperCase()
+
+const money = (value) => `Rs. ${(Number(value) || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+})}`
+
+const orderDate = (timestamp) => `${new Date(timestamp).toLocaleString('en-US', {
+    timeZone: 'Asia/Karachi',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+})} PKT`
+
+// Small Cloudinary thumbnails keep the mail light. f_auto is left out on
+// purpose: some mail clients still cannot render the WebP it serves.
+const thumbnail = (url) => {
+    if (typeof url !== 'string' || !url.includes('/image/upload/')) return url
+    return url.replace('/image/upload/', '/image/upload/q_auto,c_fill,w_128,h_128/')
+}
+
+const orderEmailHtml = ({
+    statusLabel,
+    heading,
+    intro,
+    orderId,
+    date,
+    items,
+    subtotal,
+    discount,
+    couponCode,
+    shipping,
+    amount,
+    address,
+    ctaLabel,
+    ctaUrl,
+    footerNote,
+}) => {
+    const itemRows = (items || []).map((item) => {
+        const image = thumbnail((item.image || [])[0])
+        return `<tr>
+            <td width="76" style="padding:14px 0;border-bottom:1px solid #eef1f4;vertical-align:top;">
+                ${image ? `<img src="${escapeHtml(image)}" width="64" height="64" alt="" style="display:block;width:64px;height:64px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;background:#f8fafc;" />` : ''}
+            </td>
+            <td style="padding:14px 12px;border-bottom:1px solid #eef1f4;vertical-align:top;">
+                <div style="font-size:14px;font-weight:600;color:#111827;line-height:1.4;">${escapeHtml(item.name)}</div>
+                <div style="font-size:13px;color:#6b7280;margin-top:4px;">${money(item.price)} &times; ${escapeHtml(item.quantity)}</div>
+            </td>
+            <td align="right" style="padding:14px 0;border-bottom:1px solid #eef1f4;vertical-align:top;font-size:14px;font-weight:600;color:#111827;white-space:nowrap;">
+                ${money(Number(item.price) * Number(item.quantity))}
+            </td>
+        </tr>`
+    }).join('')
+
+    const summaryRow = (label, value, { negative = false, strong = false, border = false } = {}) => `
+        <tr>
+            <td style="padding:${border ? '16px 0 4px' : '6px 0'};${border ? 'border-top:1px solid #e5e7eb;' : ''}font-size:${strong ? '16px' : '14px'};font-weight:${strong ? 700 : 400};color:#374151;">${label}</td>
+            <td align="right" style="padding:${border ? '16px 0 4px' : '6px 0'};${border ? 'border-top:1px solid #e5e7eb;' : ''}font-size:${strong ? '18px' : '14px'};font-weight:${strong ? 700 : 500};color:${negative ? '#15803d' : '#111827'};white-space:nowrap;">${value}</td>
+        </tr>`
+
+    const discountRow = Number(discount) > 0
+        ? summaryRow(
+            `Order discount${couponCode ? ` <span style="font-size:12px;color:#9ca3af;">(${escapeHtml(couponCode)})</span>` : ''}`,
+            `-${money(discount)}`,
+            { negative: true }
+        )
+        : ''
+
+    const addressHtml = [
+        `${address.firstName} ${address.lastName}`.trim(),
+        address.street,
+        [address.city, address.state, address.zipcode].filter(Boolean).join(', '),
+        address.country,
+        address.phone,
+        address.email,
+    ].filter(Boolean).map((line) => escapeHtml(line)).join('<br/>')
+
+    const itemCount = (items || []).reduce((total, item) => total + (Number(item.quantity) || 0), 0)
+
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(heading)}</title>
+</head>
+<body style="margin:0;padding:0;background:#eef2f6;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(heading)} #${escapeHtml(shortOrderId(orderId))} for ${money(amount)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef2f6;">
+    <tr>
+        <td align="center" style="padding:24px 12px;">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+
+                <tr>
+                    <td style="background:#0b0b0c;padding:26px 32px;">
+                        <div style="font-size:19px;font-weight:700;letter-spacing:8px;color:#ffffff;">DERMYX</div>
+                        <div style="font-size:11px;letter-spacing:3px;color:#bfe3fd;margin-top:6px;">ADVANCED SKINCARE</div>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:30px 32px 0;">
+                        <span style="display:inline-block;background:#eef7ff;border:1px solid #cfe8ff;border-radius:999px;color:#0b5cad;font-size:11px;font-weight:700;letter-spacing:1.5px;padding:6px 12px;">${statusLabel}</span>
+                        <h1 style="margin:16px 0 8px;font-size:24px;line-height:1.25;color:#111827;font-weight:700;">${escapeHtml(heading)}</h1>
+                        <p style="margin:0;font-size:13px;color:#6b7280;">
+                            Order #${escapeHtml(shortOrderId(orderId))}
+                            <span style="color:#d1d5db;"> &middot; </span>${escapeHtml(orderDate(date))}
+                            <span style="color:#d1d5db;"> &middot; </span>${itemCount} ${itemCount === 1 ? 'item' : 'items'}
+                        </p>
+                        ${intro ? `<p style="margin:16px 0 0;font-size:15px;line-height:1.6;color:#4b5563;">${intro}</p>` : ''}
+                        ${ctaUrl ? `<div style="margin-top:22px;"><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#0b0b0c;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:13px 24px;border-radius:10px;">${escapeHtml(ctaLabel)}</a></div>` : ''}
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:30px 32px 0;">
+                        <p style="margin:0 0 4px;font-size:12px;font-weight:700;letter-spacing:1.5px;color:#9ca3af;">ORDER SUMMARY</p>
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${itemRows}</table>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:12px 32px 0;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                            ${summaryRow('Subtotal', money(subtotal))}
+                            ${discountRow}
+                            ${summaryRow('Shipping <span style="font-size:12px;color:#9ca3af;">(Standard)</span>', Number(shipping) > 0 ? money(shipping) : 'Free')}
+                            ${summaryRow('Total <span style="font-size:12px;font-weight:500;color:#6b7280;">PKR</span>', money(amount), { strong: true, border: true })}
+                        </table>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:26px 32px 0;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;">
+                            <tr>
+                                <td style="padding:14px 16px;font-size:13px;color:#6b7280;">Payment</td>
+                                <td align="right" style="padding:14px 16px;font-size:13px;font-weight:600;color:#111827;">
+                                    Cash on Delivery (COD)<br/>
+                                    <span style="font-weight:500;color:#6b7280;">${money(amount)} due on delivery</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" style="padding:0 16px;font-size:0;line-height:0;">
+                                    <div style="border-top:1px solid #e5e7eb;"></div>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding:14px 16px;font-size:13px;color:#6b7280;">Shipping</td>
+                                <td align="right" style="padding:14px 16px;font-size:13px;font-weight:600;color:#111827;">Standard</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <tr>
+                    <td style="padding:26px 32px 0;">
+                        <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:1.5px;color:#9ca3af;">DELIVERING TO</p>
+                        <p style="margin:0;font-size:14px;line-height:1.7;color:#374151;">${addressHtml}</p>
+                    </td>
+                </tr>
+
+                ${footerNote ? `<tr><td style="padding:22px 32px 0;"><p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;">${footerNote}</p></td></tr>` : ''}
+
+                <tr>
+                    <td style="padding:28px 32px 30px;">
+                        <div style="border-top:1px solid #e5e7eb;padding-top:18px;font-size:12px;line-height:1.7;color:#9ca3af;">
+                            Questions about this order? Reply to this email or message us on WhatsApp at 0307-5111131.<br/>
+                            Dermyx Skincare &middot; dermyxskincare.com
+                        </div>
+                    </td>
+                </tr>
+
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>`
+}
+
+const sendOwnerOrderNotification = async (order) => {
     try {
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return;
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
-        });
-        const itemList = items.map(i => `<li style="margin-bottom:4px;">${escapeHtml(i.name)} x${escapeHtml(i.quantity)} — Rs. ${escapeHtml(i.price)}</li>`).join('');
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+        await sendMail({
             to: process.env.OWNER_EMAIL,
-            subject: safeSubject(`🛒 New Order Received – Rs. ${amount}`),
-            html: `
-            <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px;">
-                <h2 style="color:#1d4ed8;">New Order on DermyxSkincare!</h2>
-                <div style="background:#f0f9ff;border-left:4px solid #1d4ed8;padding:12px 16px;border-radius:6px;margin:16px 0;">
-                    <p style="margin:0;font-size:15px;color:#1e40af;font-weight:bold;">Total: Rs. ${amount}</p>
-                </div>
-                <h3 style="color:#374151;margin-bottom:8px;">📦 Items Ordered:</h3>
-                <ul style="color:#374151;font-size:14px;padding-left:20px;">${itemList}</ul>
-                <h3 style="color:#374151;margin-top:16px;margin-bottom:8px;">📍 Delivery Address:</h3>
-                <p style="color:#374151;font-size:14px;line-height:1.6;">
-                    ${escapeHtml(address.firstName)} ${escapeHtml(address.lastName)}<br/>
-                    ${escapeHtml(address.street)}, ${escapeHtml(address.city)}<br/>
-                    ${escapeHtml(address.state)}, ${escapeHtml(address.zipcode)}<br/>
-                    ${escapeHtml(address.country)}<br/>
-                    📞 ${escapeHtml(address.phone)}
-                </p>
-                <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;"/>
-                <p style="color:#9ca3af;font-size:12px;">DermyxSkincare – Automated Order Notification</p>
-            </div>`
-        });
+            subject: safeSubject(`New order #${shortOrderId(order.orderId)} - ${money(order.amount)}`),
+            html: orderEmailHtml({
+                statusLabel: 'NEW ORDER',
+                heading: 'New order created',
+                intro: 'A customer just placed a Cash on Delivery order. The details are ready below.',
+                orderId: order.orderId,
+                date: order.date,
+                items: order.items,
+                subtotal: order.subtotal,
+                discount: order.discount,
+                couponCode: order.couponCode,
+                shipping: order.shipping,
+                amount: order.amount,
+                address: order.address,
+                ctaLabel: 'View order',
+                ctaUrl: `${process.env.ADMIN_URL || 'https://dermyx-admin.vercel.app'}/orders`,
+                footerNote: 'Payment is collected in cash when the parcel is delivered.',
+            }),
+        })
     } catch (err) {
         console.log("Order notification error:", err.message);
     }
 };
 
 // Customer-facing thank-you confirmation for the order they just placed
-const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, orderId, showTracking = true) => {
+const sendOrderConfirmationEmail = async (order) => {
     try {
-        const itemRows = (items || []).map(i => `
-            <tr>
-                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;">${escapeHtml(i.name)}${Number(i.quantity) > 1 ? ` <span style="color:#2563eb;font-size:12px;">(Buy ${escapeHtml(i.quantity)} bundle)</span>` : ''}</td>
-                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:center;">${escapeHtml(i.quantity)}</td>
-                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:right;">Rs. ${(Number(i.price) * Number(i.quantity)).toFixed(2)}</td>
-            </tr>`).join('');
-
-        const firstName = address?.firstName || 'there';
+        const firstName = order.address?.firstName || 'there'
+        const frontend = process.env.FRONTEND_URL || ''
 
         await sendMail({
-            to: buyerEmail,
-            subject: safeSubject(`Thank you for your order, ${firstName}! (#${String(orderId).slice(-6).toUpperCase()})`),
-            html: emailShell(`Thank you for shopping with us, ${escapeHtml(firstName)}! 🌿`, `
-                <p style="color:#374151;font-size:15px;margin:0 0 16px;">
-                    We've received your order and our team is already packing it. Here's a copy of your details.
-                </p>
-                <div style="background:#f0f9ff;border-left:4px solid #1d4ed8;padding:12px 16px;border-radius:6px;margin:16px 0;">
-                    <p style="margin:0;font-size:13px;color:#1e40af;">Order ID</p>
-                    <p style="margin:2px 0 0;font-size:16px;color:#1e3a8a;font-weight:bold;">#${String(orderId).slice(-6).toUpperCase()}</p>
-                    <p style="margin:8px 0 0;font-size:15px;color:#1e40af;font-weight:bold;">Total payable: Rs. ${amount} (Cash on Delivery)</p>
-                </div>
-                <h3 style="color:#374151;margin:20px 0 8px;font-size:15px;">Your items</h3>
-                <table style="width:100%;border-collapse:collapse;font-size:14px;color:#374151;">
-                    <thead>
-                        <tr style="text-align:left;color:#9ca3af;font-size:12px;">
-                            <th style="padding-bottom:6px;">Product</th>
-                            <th style="padding-bottom:6px;text-align:center;">Qty</th>
-                            <th style="padding-bottom:6px;text-align:right;">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>${itemRows}</tbody>
-                </table>
-                <h3 style="color:#374151;margin:20px 0 8px;font-size:15px;">Delivering to</h3>
-                <p style="color:#374151;font-size:14px;line-height:1.6;margin:0;">
-                    ${escapeHtml(address?.firstName || '')} ${escapeHtml(address?.lastName || '')}<br/>
-                    ${escapeHtml(address?.street || '')}, ${escapeHtml(address?.city || '')}<br/>
-                    ${escapeHtml(address?.state || '')}, ${escapeHtml(address?.zipcode || '')}<br/>
-                    ${escapeHtml(address?.country || '')}<br/>
-                    ${escapeHtml(address?.phone || '')}
-                </p>
-                <p style="color:#6b7280;font-size:13px;margin-top:20px;">
-                    ${showTracking ? `You can track this order any time from <a href="${process.env.FRONTEND_URL || ''}/orders">My Orders</a>.` : ''}
-                    Questions? Reply to this email or WhatsApp us on 0307-5111131.
-                </p>`)
+            to: order.buyerEmail,
+            subject: safeSubject(`Thank you for your order, ${firstName}! (#${shortOrderId(order.orderId)})`),
+            html: orderEmailHtml({
+                statusLabel: 'ORDER CONFIRMED',
+                heading: 'Thank you for your order',
+                intro: `Hi ${escapeHtml(firstName)}, we have received your order and our team is already packing it. Here is a copy of everything for your records.`,
+                orderId: order.orderId,
+                date: order.date,
+                items: order.items,
+                subtotal: order.subtotal,
+                discount: order.discount,
+                couponCode: order.couponCode,
+                shipping: order.shipping,
+                amount: order.amount,
+                address: order.address,
+                ctaLabel: order.showTracking ? 'Track your order' : 'Continue shopping',
+                ctaUrl: order.showTracking ? `${frontend}/orders` : `${frontend}/`,
+                footerNote: 'You can reply to this email with any question about your order.',
+            }),
         })
     } catch (err) {
         console.log("Order confirmation email error:", err.message);
@@ -242,13 +395,28 @@ const placeOrder = async (req,res) => {
         // Guests have no account cart to clear.
         const savedUser = userId ? await userModel.findByIdAndUpdate(userId,{cartData:{}}) : null
 
+        const orderSummary = {
+            orderId: newOrder._id,
+            date: newOrder.date,
+            items: orderItems,
+            subtotal,
+            discount,
+            couponCode: coupon?.code,
+            shipping,
+            amount: orderAmount,
+            address,
+        }
+
         // Notify owner
-        await sendOwnerOrderNotification(address, orderItems, orderAmount)
+        await sendOwnerOrderNotification(orderSummary)
 
         // Thank-you confirmation to the buyer (the delivery form email wins,
         // the account email is the fallback)
-        const buyerEmail = address.email || savedUser?.email
-        await sendOrderConfirmationEmail(buyerEmail, orderItems, orderAmount, address, newOrder._id, Boolean(userId))
+        await sendOrderConfirmationEmail({
+            ...orderSummary,
+            buyerEmail: address.email || savedUser?.email,
+            showTracking: Boolean(userId),
+        })
 
         res.json({success:true,message:"Order Placed",orderId:newOrder._id})
 

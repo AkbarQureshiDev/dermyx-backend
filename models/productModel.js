@@ -17,6 +17,7 @@ const productSchema = new mongoose.Schema({
     originalPrice: { type: Number, default: 0 },  // crossed-out price for discounts
     badge: { type: String, default: '' },          // e.g. "SALE", "FREE", "NEW"
     features: { type: Array, default: [] },        // e.g. ["Dermatologically Tested", "All Skin Types"]
+    ingredients: { type: String, default: '' },    // free text, shown as an expandable FAQ on the product page
     inStock: { type: Boolean, default: true }      // stock status
 })
 
