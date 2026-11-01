@@ -42,7 +42,15 @@ const subscribeNewsletter = async (req, res) => {
         }
 
         const newSubscriber = new subscriberModel({ email, date: Date.now() });
-        await newSubscriber.save();
+        try {
+            await newSubscriber.save();
+        } catch (error) {
+            // Two submits of the same address can race past the lookup above.
+            if (error.code === 11000) {
+                return res.json({ success: false, message: "This email is already subscribed!" });
+            }
+            throw error;
+        }
 
         // Notify owner
         await sendOwnerNotification(

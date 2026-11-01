@@ -1,14 +1,45 @@
+import mongoose from "mongoose";
 import orderModel from "../models/orderModel.js";
 import userModel from "../models/userModel.js";
 import productModel from "../models/productModel.js";
 import nodemailer from "nodemailer";
-import { sendMail, emailShell } from "../config/mailer.js";
+import { sendMail, emailShell, escapeHtml, safeSubject } from "../config/mailer.js";
 import { findCoupon } from "./couponController.js";
 
-// global variables
-const currency = 'inr'
-const deliveryCharge = 10
+const DELIVERY_FEE = 250
 const FREE_SHIPPING_THRESHOLD = 3000
+
+// Mirrors the bundle pricing shown in the storefront: the discount depends on
+// how many units of one product are bought.
+const bundleUnitPrice = (basePrice, quantity) => {
+    const discount = quantity >= 3 ? 0.10 : quantity >= 2 ? 0.05 : 0
+    return +(Number(basePrice) * (1 - discount)).toFixed(2)
+}
+
+const ADDRESS_LIMITS = {
+    firstName: 80,
+    lastName: 80,
+    email: 120,
+    street: 200,
+    city: 80,
+    state: 80,
+    zipcode: 20,
+    country: 60,
+    phone: 40,
+}
+
+const REQUIRED_ADDRESS_FIELDS = ['firstName', 'lastName', 'street', 'city', 'country', 'phone']
+
+// The delivery form is public input: keep only known fields, trimmed and capped,
+// so nothing else from the request ends up in the order or the emails.
+const cleanAddress = (address) => {
+    const source = address && typeof address === 'object' ? address : {}
+    const clean = {}
+    for (const [field, max] of Object.entries(ADDRESS_LIMITS)) {
+        clean[field] = String(source[field] ?? '').trim().slice(0, max)
+    }
+    return clean
+}
 
 const sendOwnerOrderNotification = async (address, items, amount) => {
     try {
@@ -17,11 +48,11 @@ const sendOwnerOrderNotification = async (address, items, amount) => {
             service: 'gmail',
             auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
         });
-        const itemList = items.map(i => `<li style="margin-bottom:4px;">${i.name} x${i.quantity} — Rs. ${i.price}</li>`).join('');
+        const itemList = items.map(i => `<li style="margin-bottom:4px;">${escapeHtml(i.name)} x${escapeHtml(i.quantity)} — Rs. ${escapeHtml(i.price)}</li>`).join('');
         await transporter.sendMail({
             from: process.env.EMAIL_USER,
             to: process.env.OWNER_EMAIL,
-            subject: `🛒 New Order Received – Rs. ${amount}`,
+            subject: safeSubject(`🛒 New Order Received – Rs. ${amount}`),
             html: `
             <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px;">
                 <h2 style="color:#1d4ed8;">New Order on DermyxSkincare!</h2>
@@ -32,11 +63,11 @@ const sendOwnerOrderNotification = async (address, items, amount) => {
                 <ul style="color:#374151;font-size:14px;padding-left:20px;">${itemList}</ul>
                 <h3 style="color:#374151;margin-top:16px;margin-bottom:8px;">📍 Delivery Address:</h3>
                 <p style="color:#374151;font-size:14px;line-height:1.6;">
-                    ${address.firstName} ${address.lastName}<br/>
-                    ${address.street}, ${address.city}<br/>
-                    ${address.state}, ${address.zipcode}<br/>
-                    ${address.country}<br/>
-                    📞 ${address.phone}
+                    ${escapeHtml(address.firstName)} ${escapeHtml(address.lastName)}<br/>
+                    ${escapeHtml(address.street)}, ${escapeHtml(address.city)}<br/>
+                    ${escapeHtml(address.state)}, ${escapeHtml(address.zipcode)}<br/>
+                    ${escapeHtml(address.country)}<br/>
+                    📞 ${escapeHtml(address.phone)}
                 </p>
                 <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0;"/>
                 <p style="color:#9ca3af;font-size:12px;">DermyxSkincare – Automated Order Notification</p>
@@ -52,8 +83,8 @@ const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, or
     try {
         const itemRows = (items || []).map(i => `
             <tr>
-                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;">${i.name}${Number(i.quantity) > 1 ? ` <span style="color:#2563eb;font-size:12px;">(Buy ${i.quantity} bundle)</span>` : ''}</td>
-                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:center;">${i.quantity}</td>
+                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;">${escapeHtml(i.name)}${Number(i.quantity) > 1 ? ` <span style="color:#2563eb;font-size:12px;">(Buy ${escapeHtml(i.quantity)} bundle)</span>` : ''}</td>
+                <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:center;">${escapeHtml(i.quantity)}</td>
                 <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;text-align:right;">Rs. ${(Number(i.price) * Number(i.quantity)).toFixed(2)}</td>
             </tr>`).join('');
 
@@ -61,8 +92,8 @@ const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, or
 
         await sendMail({
             to: buyerEmail,
-            subject: `Thank you for your order, ${firstName}! (#${String(orderId).slice(-6).toUpperCase()})`,
-            html: emailShell(`Thank you for shopping with us, ${firstName}! 🌿`, `
+            subject: safeSubject(`Thank you for your order, ${firstName}! (#${String(orderId).slice(-6).toUpperCase()})`),
+            html: emailShell(`Thank you for shopping with us, ${escapeHtml(firstName)}! 🌿`, `
                 <p style="color:#374151;font-size:15px;margin:0 0 16px;">
                     We've received your order and our team is already packing it. Here's a copy of your details.
                 </p>
@@ -84,11 +115,11 @@ const sendOrderConfirmationEmail = async (buyerEmail, items, amount, address, or
                 </table>
                 <h3 style="color:#374151;margin:20px 0 8px;font-size:15px;">Delivering to</h3>
                 <p style="color:#374151;font-size:14px;line-height:1.6;margin:0;">
-                    ${address?.firstName || ''} ${address?.lastName || ''}<br/>
-                    ${address?.street || ''}, ${address?.city || ''}<br/>
-                    ${address?.state || ''}, ${address?.zipcode || ''}<br/>
-                    ${address?.country || ''}<br/>
-                    ${address?.phone || ''}
+                    ${escapeHtml(address?.firstName || '')} ${escapeHtml(address?.lastName || '')}<br/>
+                    ${escapeHtml(address?.street || '')}, ${escapeHtml(address?.city || '')}<br/>
+                    ${escapeHtml(address?.state || '')}, ${escapeHtml(address?.zipcode || '')}<br/>
+                    ${escapeHtml(address?.country || '')}<br/>
+                    ${escapeHtml(address?.phone || '')}
                 </p>
                 <p style="color:#6b7280;font-size:13px;margin-top:20px;">
                     ${showTracking ? `You can track this order any time from <a href="${process.env.FRONTEND_URL || ''}/orders">My Orders</a>.` : ''}
@@ -106,7 +137,7 @@ const sendReviewRequestEmail = async (order) => {
         const productName = process.env.FRONTEND_URL || ''
         const links = (order.items || []).map(i => `
             <li style="margin-bottom:6px;">
-                <a href="${productName}/product/${i._id}" style="color:#1d4ed8;">${i.name}</a>
+                <a href="${productName}/product/${encodeURIComponent(i._id)}" style="color:#1d4ed8;">${escapeHtml(i.name)}</a>
             </li>`).join('')
 
         await sendMail({
@@ -114,7 +145,7 @@ const sendReviewRequestEmail = async (order) => {
             subject: "How did your Dermyx order work out?",
             html: emailShell(`Your order is delivered — now we'd love your honest review`, `
                 <p style="color:#374151;font-size:15px;margin:0 0 16px;">
-                    Hi ${order.address?.firstName || 'there'}, your order #${String(order._id).slice(-6).toUpperCase()}
+                    Hi ${escapeHtml(order.address?.firstName || 'there')}, your order #${String(order._id).slice(-6).toUpperCase()}
                     has been marked as delivered. If it worked for your skin, a 30-second review helps
                     other customers decide — and it keeps us stocking the right things.
                 </p>
@@ -133,40 +164,69 @@ const placeOrder = async (req,res) => {
     
     try {
         
-        const { userId, items, amount, address, couponCode, subtotal, deliveryFee } = req.body;
+        const { userId, items, couponCode } = req.body;
 
-        // A cart built before an admin marked an item out of stock must not
-        // check out, so the live stock flags are read from the database.
-        const productIds = [...new Set((items || []).map(item => item._id).filter(Boolean))];
-        const liveProducts = await productModel.find({ _id: { $in: productIds } }).select('_id name inStock');
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.json({ success: false, message: 'Your cart is empty' })
+        }
+
+        const address = cleanAddress(req.body.address)
+        const missing = REQUIRED_ADDRESS_FIELDS.filter(field => !address[field])
+        if (missing.length > 0) {
+            return res.json({ success: false, message: `Please fill in the delivery details: ${missing.join(', ')}` })
+        }
+
+        // Prices, bundle discounts and shipping are all derived here from the
+        // database so nothing the browser sends can change what is charged.
+        const productIds = [...new Set(items.map(item => String(item?._id ?? '')))]
+            .filter(id => mongoose.Types.ObjectId.isValid(id));
+        const liveProducts = await productModel.find({ _id: { $in: productIds } }).select('_id name price image inStock');
         const liveById = Object.fromEntries(liveProducts.map(p => [p._id.toString(), p]));
 
-        const soldOut = (items || [])
-            .map(item => liveById[item._id])
-            .filter(product => !product || product.inStock === false)
-            .map(product => product.name);
+        const soldOut = []
+        const orderItems = []
+        let subtotal = 0
+
+        for (const item of items) {
+            const product = liveById[String(item?._id ?? '')]
+            if (!product) {
+                return res.json({ success: false, message: 'Some items in your cart are no longer available. Please refresh and try again.' })
+            }
+            if (product.inStock === false) {
+                soldOut.push(product.name)
+                continue
+            }
+
+            const quantity = Number(item.quantity)
+            if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+                return res.json({ success: false, message: `Please choose a valid quantity for ${product.name}` })
+            }
+
+            const price = bundleUnitPrice(product.price, quantity)
+            subtotal += price * quantity
+            orderItems.push({
+                _id: product._id.toString(),
+                name: product.name,
+                image: product.image || [],
+                size: typeof item.size === 'string' ? item.size.slice(0, 24) : 'default',
+                quantity,
+                price,
+            })
+        }
 
         if (soldOut.length > 0) {
             return res.json({ success: false, message: `Out of stock: ${soldOut.join(', ')}` })
         }
 
-        // The browser sends the subtotal it displayed; the code and the free
-        // shipping rule are applied here so neither can be edited in the request.
+        subtotal = +subtotal.toFixed(2)
         const coupon = await findCoupon(couponCode)
-        const baseSubtotal = Number(subtotal)
-        const shipping = Number.isFinite(baseSubtotal) && baseSubtotal > FREE_SHIPPING_THRESHOLD
-            ? 0
-            : (Number(deliveryFee) || 0)
-        let discount = 0
-        let orderAmount = Number(amount) || 0
-        if (Number.isFinite(baseSubtotal)) {
-            if (coupon) discount = +(baseSubtotal * coupon.percent / 100).toFixed(2)
-            orderAmount = +(baseSubtotal + shipping - discount).toFixed(2)
-        }
+        const shipping = subtotal > FREE_SHIPPING_THRESHOLD ? 0 : DELIVERY_FEE
+        const discount = coupon ? +(subtotal * coupon.percent / 100).toFixed(2) : 0
+        const orderAmount = +(subtotal + shipping - discount).toFixed(2)
 
         const orderData = {
             userId,
-            items,
+            items: orderItems,
             address,
             amount: orderAmount,
             couponCode: coupon?.code,
@@ -183,12 +243,12 @@ const placeOrder = async (req,res) => {
         const savedUser = userId ? await userModel.findByIdAndUpdate(userId,{cartData:{}}) : null
 
         // Notify owner
-        await sendOwnerOrderNotification(address, items, orderAmount)
+        await sendOwnerOrderNotification(address, orderItems, orderAmount)
 
         // Thank-you confirmation to the buyer (the delivery form email wins,
         // the account email is the fallback)
-        const buyerEmail = address?.email || savedUser?.email
-        await sendOrderConfirmationEmail(buyerEmail, items, orderAmount, address, newOrder._id, Boolean(userId))
+        const buyerEmail = address.email || savedUser?.email
+        await sendOrderConfirmationEmail(buyerEmail, orderItems, orderAmount, address, newOrder._id, Boolean(userId))
 
         res.json({success:true,message:"Order Placed",orderId:newOrder._id})
 
@@ -199,145 +259,6 @@ const placeOrder = async (req,res) => {
     }
 
 }
-
-// Placing orders using Stripe Method
-const placeOrderStripe = async (req,res) => {
-    try {
-        
-        const { userId, items, amount, address} = req.body
-        const { origin } = req.headers;
-
-        const orderData = {
-            userId,
-            items,
-            address,
-            amount,
-            paymentMethod:"Stripe",
-            payment:false,
-            date: Date.now()
-        }
-
-        const newOrder = new orderModel(orderData)
-        await newOrder.save()
-
-        const line_items = items.map((item) => ({
-            price_data: {
-                currency:currency,
-                product_data: {
-                    name:item.name
-                },
-                unit_amount: item.price * 100
-            },
-            quantity: item.quantity
-        }))
-
-        line_items.push({
-            price_data: {
-                currency:currency,
-                product_data: {
-                    name:'Delivery Charges'
-                },
-                unit_amount: deliveryCharge * 100
-            },
-            quantity: 1
-        })
-
-        const session = await stripe.checkout.sessions.create({
-            success_url: `${origin}/verify?success=true&orderId=${newOrder._id}`,
-            cancel_url:  `${origin}/verify?success=false&orderId=${newOrder._id}`,
-            line_items,
-            mode: 'payment',
-        })
-
-        res.json({success:true,session_url:session.url});
-
-    } catch (error) {
-        console.log(error)
-        res.json({success:false,message:error.message})
-    }
-}
-
-// Verify Stripe 
-const verifyStripe = async (req,res) => {
-
-    const { orderId, success, userId } = req.body
-
-    try {
-        if (success === "true") {
-            await orderModel.findByIdAndUpdate(orderId, {payment:true});
-            await userModel.findByIdAndUpdate(userId, {cartData: {}})
-            res.json({success: true});
-        } else {
-            await orderModel.findByIdAndDelete(orderId)
-            res.json({success:false})
-        }
-        
-    } catch (error) {
-        console.log(error)
-        res.json({success:false,message:error.message})
-    }
-
-}
-
-// Placing orders using Razorpay Method
-const placeOrderRazorpay = async (req,res) => {
-    try {
-        
-        const { userId, items, amount, address} = req.body
-
-        const orderData = {
-            userId,
-            items,
-            address,
-            amount,
-            paymentMethod:"Razorpay",
-            payment:false,
-            date: Date.now()
-        }
-
-        const newOrder = new orderModel(orderData)
-        await newOrder.save()
-
-        const options = {
-            amount: amount * 100,
-            currency: currency.toUpperCase(),
-            receipt : newOrder._id.toString()
-        }
-
-        await razorpayInstance.orders.create(options, (error,order)=>{
-            if (error) {
-                console.log(error)
-                return res.json({success:false, message: error})
-            }
-            res.json({success:true,order})
-        })
-
-    } catch (error) {
-        console.log(error)
-        res.json({success:false,message:error.message})
-    }
-}
-
-const verifyRazorpay = async (req,res) => {
-    try {
-        
-        const { userId, razorpay_order_id  } = req.body
-
-        const orderInfo = await razorpayInstance.orders.fetch(razorpay_order_id)
-        if (orderInfo.status === 'paid') {
-            await orderModel.findByIdAndUpdate(orderInfo.receipt,{payment:true});
-            await userModel.findByIdAndUpdate(userId,{cartData:{}})
-            res.json({ success: true, message: "Payment Successful" })
-        } else {
-             res.json({ success: false, message: 'Payment Failed' });
-        }
-
-    } catch (error) {
-        console.log(error)
-        res.json({success:false,message:error.message})
-    }
-}
-
 
 // All Orders data for Admin Panel
 const allOrders = async (req,res) => {
@@ -419,4 +340,4 @@ const deliveredOrders = async (req, res) => {
     }
 }
 
-export {verifyRazorpay, verifyStripe ,placeOrder, placeOrderStripe, placeOrderRazorpay, allOrders, userOrders, updateStatus, deleteOrder, deliveredOrders}
+export { placeOrder, allOrders, userOrders, updateStatus, deleteOrder, deliveredOrders }

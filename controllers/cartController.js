@@ -30,6 +30,9 @@ const addToCart = async (req,res) => {
         }
 
         const userData = await userModel.findById(userId)
+        if (!userData) {
+            return res.json({ success: false, message: "Your session expired. Please log in again." })
+        }
         let cartData = normalizeCart(userData.cartData);
 
         const line = { ...(cartData[itemId] || {}) }
@@ -64,6 +67,9 @@ const updateCart = async (req,res) => {
         }
 
         const userData = await userModel.findById(userId)
+        if (!userData) {
+            return res.json({ success: false, message: "Your session expired. Please log in again." })
+        }
         let cartData = normalizeCart(userData.cartData);
 
         const line = { ...(cartData[itemId] || {}) }
@@ -96,6 +102,9 @@ const mergeCart = async (req,res) => {
         const { userId, mergeData } = req.body
 
         const userData = await userModel.findById(userId)
+        if (!userData) {
+            return res.json({ success: false, message: "Your session expired. Please log in again." })
+        }
         const savedCart = normalizeCart(userData.cartData)
         const guestCart = normalizeCart(mergeData)
 
@@ -129,6 +138,9 @@ const getUserCart = async (req,res) => {
         const { userId } = req.body
         
         const userData = await userModel.findById(userId)
+        if (!userData) {
+            return res.json({ success: false, message: "Your session expired. Please log in again." })
+        }
         let cartData = normalizeCart(userData.cartData);
 
         res.json({ success: true, cartData })

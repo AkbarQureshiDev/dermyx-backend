@@ -69,7 +69,9 @@ app.use(cors({
 }))
 
 // --- Body parsing & cookie parsing ---
-app.use(express.json({ limit: '10kb' }))  // cap body size to prevent large payload attacks
+// Orders carry a copy of each cart line (name, images, size), so a full cart is
+// several KB and grows with the catalog. 100kb still rejects abusive payloads.
+app.use(express.json({ limit: '100kb' }))
 app.use(cookieParser())
 
 // --- NoSQL injection sanitization ---
@@ -136,8 +138,6 @@ app.use('/api/user/admin', adminLimiter)
 app.use('/api/contact', publicFormLimiter)
 app.use('/api/newsletter', publicFormLimiter)
 app.use('/api/order/place', checkoutLimiter)
-app.use('/api/order/stripe', checkoutLimiter)
-app.use('/api/order/razorpay', checkoutLimiter)
 app.use('/api/review/add', reviewLimiter)
 app.use('/api/review/helpful', reviewLimiter)
 app.use('/api/coupon/validate', couponLimiter)
@@ -159,11 +159,16 @@ app.get('/', (req, res) => {
 // --- Central error handler (no stack traces to client) ---
 app.use((err, req, res, next) => {
     console.error(err) // log full error server-side only
-    res.status(err.status || 500).json({
+    const isUploadError = err.name === 'MulterError'
+    const status = err.status || (isUploadError ? 400 : 500)
+    const uploadMessage = err.code === 'LIMIT_FILE_SIZE'
+        ? 'That image is too large. Please upload a file under 8 MB.'
+        : 'Image upload failed. Please try again.'
+    // `expose` marks the few errors written for the admin (e.g. wrong file type).
+    const publicMessage = isUploadError ? uploadMessage : (err.expose ? err.message : 'Something went wrong')
+    res.status(status).json({
         success: false,
-        message: process.env.NODE_ENV === 'production'
-            ? 'Something went wrong'
-            : err.message
+        message: process.env.NODE_ENV === 'production' ? publicMessage : err.message
     })
 })
 
