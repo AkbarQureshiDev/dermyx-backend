@@ -329,6 +329,12 @@ const placeOrder = async (req,res) => {
             return res.json({ success: false, message: `Please fill in the delivery details: ${missing.join(', ')}` })
         }
 
+        // Pakistani mobile numbers are 11 digits; reject anything else so the
+        // courier never gets an unusable number.
+        if (address.phone.replace(/\D/g, '').length !== 11) {
+            return res.json({ success: false, message: 'Check your number' })
+        }
+
         // Prices, bundle discounts and shipping are all derived here from the
         // database so nothing the browser sends can change what is charged.
         const productIds = [...new Set(items.map(item => String(item?._id ?? '')))]
