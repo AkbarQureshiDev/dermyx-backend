@@ -7,6 +7,12 @@ import orderModel from '../models/orderModel.js'
 const DEFAULT_COUPONS = [
     { code: 'Fati10', percent: 5 },
     { code: 'Ashar10', percent: 5 },
+    { code: 'Mehak10', percent: 5 },
+    { code: 'AN10', percent: 5 },
+    { code: 'Rameen05', percent: 5 },
+    { code: 'Muskan10', percent: 5 },
+    { code: 'DrHim10', percent: 5 },
+    { code: 'AMNASK10', percent: 5 },
 ]
 
 export const seedCoupons = async () => {
