@@ -8,6 +8,7 @@ import { findCoupon } from "./couponController.js";
 // global variables
 const currency = 'inr'
 const deliveryCharge = 10
+const FREE_SHIPPING_THRESHOLD = 3000
 
 const sendOwnerOrderNotification = async (address, items, amount) => {
     try {
@@ -149,15 +150,18 @@ const placeOrder = async (req,res) => {
             return res.json({ success: false, message: `Out of stock: ${soldOut.join(', ')}` })
         }
 
-        // The browser sends the subtotal it displayed; the code is looked up here
-        // so a discount can never be applied by editing the request.
+        // The browser sends the subtotal it displayed; the code and the free
+        // shipping rule are applied here so neither can be edited in the request.
         const coupon = await findCoupon(couponCode)
         const baseSubtotal = Number(subtotal)
+        const shipping = Number.isFinite(baseSubtotal) && baseSubtotal > FREE_SHIPPING_THRESHOLD
+            ? 0
+            : (Number(deliveryFee) || 0)
         let discount = 0
         let orderAmount = Number(amount) || 0
-        if (coupon && Number.isFinite(baseSubtotal)) {
-            discount = +(baseSubtotal * coupon.percent / 100).toFixed(2)
-            orderAmount = +(baseSubtotal + (Number(deliveryFee) || 0) - discount).toFixed(2)
+        if (Number.isFinite(baseSubtotal)) {
+            if (coupon) discount = +(baseSubtotal * coupon.percent / 100).toFixed(2)
+            orderAmount = +(baseSubtotal + shipping - discount).toFixed(2)
         }
 
         const orderData = {
