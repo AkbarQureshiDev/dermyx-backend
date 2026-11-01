@@ -51,7 +51,17 @@ const listCoupons = async (req, res) => {
                 $group: {
                     _id: { $toUpper: '$couponCode' },
                     uses: { $sum: 1 },
-                    customers: { $addToSet: { $ifNull: ['$address.email', '$address.phone'] } },
+                    // Guests often leave email blank (it's optional), so fall back
+                    // to the phone number rather than counting them as unknown.
+                    customers: {
+                        $addToSet: {
+                            $cond: [
+                                { $gt: [{ $strLenCP: { $ifNull: ['$address.email', ''] } }, 0] },
+                                '$address.email',
+                                '$address.phone',
+                            ],
+                        },
+                    },
                     totalDiscount: { $sum: { $ifNull: ['$discount', 0] } },
                     totalValue: { $sum: '$amount' },
                 },
