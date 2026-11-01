@@ -14,6 +14,8 @@ import orderRouter from './routes/orderRoute.js'
 import reviewRouter from './routes/reviewRoute.js'
 import subscriberRouter from './routes/subscriberRoute.js'
 import contactRouter from './routes/contactRoute.js'
+import couponRouter from './routes/couponRoute.js'
+import { seedCoupons } from './controllers/couponController.js'
 
 const app = express()
 const port = process.env.PORT || 4000
@@ -30,7 +32,7 @@ if (process.env.NODE_ENV === 'production') {
     app.set('trust proxy', 1)
 }
 
-connectDB()
+connectDB().then(seedCoupons)
 connectCloudinary()
 
 // --- Security Headers ---
@@ -98,6 +100,15 @@ const reviewLimiter = rateLimit({
     legacyHeaders: false
 })
 
+// Discount codes are checked from a public form, so guesses need a ceiling.
+const couponLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,  // 1 hour
+    max: 40,
+    message: { success: false, message: 'Too many discount code attempts, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false
+})
+
 // The admin password is one shared credential, so guesses have to be expensive.
 const adminLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,  // 15 minutes
@@ -129,6 +140,7 @@ app.use('/api/order/stripe', checkoutLimiter)
 app.use('/api/order/razorpay', checkoutLimiter)
 app.use('/api/review/add', reviewLimiter)
 app.use('/api/review/helpful', reviewLimiter)
+app.use('/api/coupon/validate', couponLimiter)
 
 // --- API routes ---
 app.use('/api/user', userRouter)
@@ -138,6 +150,7 @@ app.use('/api/order', orderRouter)
 app.use('/api/review', reviewRouter)
 app.use('/api/newsletter', subscriberRouter)
 app.use('/api/contact', contactRouter)
+app.use('/api/coupon', couponRouter)
 
 app.get('/', (req, res) => {
     res.send("API Working")

@@ -3,6 +3,7 @@ import userModel from "../models/userModel.js";
 import productModel from "../models/productModel.js";
 import nodemailer from "nodemailer";
 import { sendMail, emailShell } from "../config/mailer.js";
+import { findCoupon } from "./couponController.js";
 
 // global variables
 const currency = 'inr'
@@ -131,7 +132,7 @@ const placeOrder = async (req,res) => {
     
     try {
         
-        const { userId, items, amount, address} = req.body;
+        const { userId, items, amount, address, couponCode, subtotal, deliveryFee } = req.body;
 
         // A cart built before an admin marked an item out of stock must not
         // check out, so the live stock flags are read from the database.
@@ -148,11 +149,24 @@ const placeOrder = async (req,res) => {
             return res.json({ success: false, message: `Out of stock: ${soldOut.join(', ')}` })
         }
 
+        // The browser sends the subtotal it displayed; the code is looked up here
+        // so a discount can never be applied by editing the request.
+        const coupon = await findCoupon(couponCode)
+        const baseSubtotal = Number(subtotal)
+        let discount = 0
+        let orderAmount = Number(amount) || 0
+        if (coupon && Number.isFinite(baseSubtotal)) {
+            discount = +(baseSubtotal * coupon.percent / 100).toFixed(2)
+            orderAmount = +(baseSubtotal + (Number(deliveryFee) || 0) - discount).toFixed(2)
+        }
+
         const orderData = {
             userId,
             items,
             address,
-            amount,
+            amount: orderAmount,
+            couponCode: coupon?.code,
+            discount,
             paymentMethod:"COD",
             payment:false,
             date: Date.now()
@@ -165,12 +179,12 @@ const placeOrder = async (req,res) => {
         const savedUser = userId ? await userModel.findByIdAndUpdate(userId,{cartData:{}}) : null
 
         // Notify owner
-        await sendOwnerOrderNotification(address, items, amount)
+        await sendOwnerOrderNotification(address, items, orderAmount)
 
         // Thank-you confirmation to the buyer (the delivery form email wins,
         // the account email is the fallback)
         const buyerEmail = address?.email || savedUser?.email
-        await sendOrderConfirmationEmail(buyerEmail, items, amount, address, newOrder._id, Boolean(userId))
+        await sendOrderConfirmationEmail(buyerEmail, items, orderAmount, address, newOrder._id, Boolean(userId))
 
         res.json({success:true,message:"Order Placed",orderId:newOrder._id})
 
