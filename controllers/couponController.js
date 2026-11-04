@@ -13,6 +13,8 @@ const DEFAULT_COUPONS = [
     { code: 'Muskan10', percent: 5 },
     { code: 'DrHim10', percent: 5 },
     { code: 'AMNASK10', percent: 5 },
+    { code: 'Dermyx05', percent: 5 },
+    { code: 'Nimra10', percent: 5 },
 ]
 
 export const seedCoupons = async () => {
