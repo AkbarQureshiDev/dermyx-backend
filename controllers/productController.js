@@ -140,7 +140,8 @@ const updateProduct = async (req, res) => {
             : features.split(',').map(f => f.trim()).filter(Boolean)
         if (ingredients !== undefined) updateData.ingredients = String(ingredients).trim().slice(0, 2000)
 
-        if (req.files && Object.keys(req.files).length > 0) {
+        const hasFiles = req.files && Object.keys(req.files).length > 0
+        if (hasFiles || existingImages !== undefined) {
             let keptImages = []
             try {
                 keptImages = existingImages ? JSON.parse(existingImages) : []
@@ -150,7 +151,7 @@ const updateProduct = async (req, res) => {
 
             const images = await Promise.all(
                 Array.from({ length: 8 }, async (_, i) => {
-                    const file = req.files[`image${i + 1}`] && req.files[`image${i + 1}`][0]
+                    const file = hasFiles && req.files[`image${i + 1}`] && req.files[`image${i + 1}`][0]
                     if (file) {
                         const result = await cloudinary.uploader.upload(file.path, { resource_type: 'image' })
                         return result.secure_url
