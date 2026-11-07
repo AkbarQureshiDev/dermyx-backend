@@ -20,11 +20,16 @@ const DEFAULT_COUPONS = [
 export const seedCoupons = async () => {
     try {
         if (mongoose.connection.readyState !== 1) return
-        await Promise.all(DEFAULT_COUPONS.map(({ code, percent }) => couponModel.updateOne(
-            { codeUpper: code.toUpperCase() },
-            { $setOnInsert: { code, codeUpper: code.toUpperCase(), percent, active: true } },
-            { upsert: true }
-        )))
+        // Seeding only bootstraps an empty collection. Admins can now add and
+        // remove codes, so re-inserting missing defaults on every boot would
+        // resurrect codes they deleted on purpose.
+        if (await couponModel.estimatedDocumentCount() > 0) return
+        await couponModel.insertMany(DEFAULT_COUPONS.map(({ code, percent }) => ({
+            code,
+            codeUpper: code.toUpperCase(),
+            percent,
+            active: true,
+        })))
     } catch (error) {
         console.log('Coupon seed error:', error.message)
     }
@@ -97,4 +102,58 @@ const listCoupons = async (req, res) => {
     }
 }
 
-export { validateCoupon, listCoupons }
+const normalizeCode = (value) => String(value || '').trim()
+const CODE_PATTERN = /^[A-Za-z0-9_-]{3,24}$/
+
+// Admin-created codes. Same casing rules as the seeded ones: `code` is what
+// shoppers type back into the site, `codeUpper` is what lookups compare.
+const addCoupon = async (req, res) => {
+    try {
+        const code = normalizeCode(req.body.code)
+        const percent = Number(req.body.percent)
+
+        if (!CODE_PATTERN.test(code)) {
+            return res.json({ success: false, message: 'Use 3-24 letters, numbers, hyphens or underscores.' })
+        }
+        if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+            return res.json({ success: false, message: 'Discount must be a whole number between 1 and 100.' })
+        }
+
+        const existing = await couponModel.exists({ codeUpper: code.toUpperCase() })
+        if (existing) {
+            return res.json({ success: false, message: 'That discount code already exists.' })
+        }
+
+        await couponModel.create({ code, codeUpper: code.toUpperCase(), percent, active: true })
+        res.json({ success: true, message: 'Discount code added.' })
+    } catch (error) {
+        // The unique index is the real guard; two admins can pass the check above together.
+        if (error.code === 11000) {
+            return res.json({ success: false, message: 'That discount code already exists.' })
+        }
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+// Orders keep their own copy of the code and discount, so past redemption
+// totals stay in the orders collection even after the code itself is gone.
+const removeCoupon = async (req, res) => {
+    try {
+        const codeUpper = normalizeCode(req.body.code).toUpperCase()
+        if (!codeUpper) {
+            return res.json({ success: false, message: 'Discount code is required.' })
+        }
+
+        const deleted = await couponModel.findOneAndDelete({ codeUpper })
+        if (!deleted) {
+            return res.json({ success: false, message: 'That discount code no longer exists.' })
+        }
+        res.json({ success: true, message: 'Discount code removed.' })
+    } catch (error) {
+        console.log(error)
+        res.json({ success: false, message: error.message })
+    }
+}
+
+export { validateCoupon, listCoupons, addCoupon, removeCoupon }
